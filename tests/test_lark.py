@@ -1,6 +1,6 @@
 import unittest
 
-from otc_collector.lark import build_card, sign
+from otc_collector.lark import build_cards, sign
 from otc_collector.models import Quote
 from otc_collector.report import top_merchants_by_orders
 
@@ -16,29 +16,31 @@ class LarkCardTests(unittest.TestCase):
             _quote("okx", "欧易", "buy", 6.66, "欧易商家"),
             _quote("htx", "HTX", "buy", 6.64, "不该出现"),
         ]
-        card = build_card(
+        cards = build_cards(
             quotes,
             "2026-10-14T18:00:00+08:00",
             [{"exchange": "htx", "exchange_name": "HTX", "error": "HTTP 429"}],
         )
-        self.assertEqual(card["schema"], "2.0")
-        self.assertEqual(card["header"]["template"], "orange")
-        self.assertEqual(card["header"]["subtitle"]["content"], "2026-10-14T18:00:00+08:00")
-        table = card["body"]["elements"][1]
-        self.assertEqual(table["tag"], "table")
-        rows = {row["exchange"]: row for row in table["rows"]}
-        self.assertEqual(rows["币安"]["buy"], "6.6500")
-        self.assertEqual(rows["币安"]["sell"], "6.6700")
-        self.assertEqual(rows["币安"]["spread"], "+0.0200")
-        self.assertEqual(rows["币安"]["count"], "买1/卖1")
-        self.assertEqual(rows["欧易"]["sell"], "—")
-        self.assertEqual(rows["欧易"]["spread"], "—")
-        self.assertEqual(rows["HTX"]["count"], "失败")
-        self.assertNotIn("不该出现", str(card))
-        text = "\n".join(element.get("content", "") for element in card["body"]["elements"])
+        self.assertEqual([card["header"]["title"]["content"] for card in cards], ["币安", "欧易", "HTX"])
+        binance, okx, htx = cards
+        self.assertEqual(binance["schema"], "2.0")
+        self.assertEqual(binance["header"]["template"], "blue")
+        self.assertEqual(binance["header"]["subtitle"]["content"], "2026-10-14T18:00:00+08:00")
+        prices = binance["body"]["elements"][0]
+        self.assertEqual(prices["tag"], "column_set")
+        values = [column["elements"][1]["content"] for column in prices["columns"]]
+        self.assertEqual(values, ["6.6500", "6.6700", "+0.0200"])
+        okx_values = [column["elements"][1]["content"] for column in okx["body"]["elements"][0]["columns"]]
+        self.assertEqual(okx_values[1], "—")
+        self.assertEqual(okx_values[2], "—")
+        self.assertEqual(htx["header"]["template"], "red")
+        self.assertNotIn("不该出现", str(cards))
+        self.assertNotIn("欧易商家", str(binance))
+        text = "\n".join(element.get("content", "") for element in binance["body"]["elements"])
         self.assertIn("便宜商家", text)
-        self.assertIn("成交单数 Top", text)
-        self.assertIn("HTTP 429", text)
+        self.assertIn("成交单数靠前", text)
+        htx_text = "\n".join(element.get("content", "") for element in htx["body"]["elements"])
+        self.assertIn("HTTP 429", htx_text)
 
     def test_merchants_ranked_by_orders_within_exchange(self):
         quotes = [
@@ -54,15 +56,18 @@ class LarkCardTests(unittest.TestCase):
         self.assertEqual(ranked[0]["orders"], 90)
         self.assertEqual(ranked[0]["buy"], 6.70)
         self.assertEqual(ranked[0]["sell"], 6.80)
-        card = build_card(quotes, "t")
+        card = build_cards(quotes, "t")[0]
         text = "\n".join(element.get("content", "") for element in card["body"]["elements"])
         self.assertIn("1. 大商家", text)
         self.assertNotIn("凑数0", text)
+        self.assertLess(text.find("1. 大商家"), text.find("2. 中商家"))
 
     def test_all_failed_card_is_red(self):
-        card = build_card([], "t", [{"exchange": "binance", "exchange_name": "币安", "error": "超时"}])
-        self.assertEqual(card["header"]["template"], "red")
-        self.assertIn("失败", card["config"]["summary"]["content"])
+        cards = build_cards([], "t", [{"exchange": "binance", "exchange_name": "币安", "error": "超时"}])
+        self.assertEqual(len(cards), 1)
+        self.assertEqual(cards[0]["header"]["title"]["content"], "币安")
+        self.assertEqual(cards[0]["header"]["template"], "red")
+        self.assertIn("失败", cards[0]["config"]["summary"]["content"])
 
     def test_webhook_host_check_rejects_other_sites(self):
         from otc_collector.lark import _valid_webhook

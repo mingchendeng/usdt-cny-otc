@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 
 from otc_collector.exchanges import EXCHANGES, resolve_exchanges
 from otc_collector.http_client import HttpClient
-from otc_collector.lark import LarkError, build_card, load_dotenv, send_card, webhook_settings
+from otc_collector.lark import LarkError, build_cards, load_dotenv, send_card, webhook_settings
 from otc_collector.models import Quote
 from otc_collector.report import format_details, format_summary
 from otc_collector.site import write_site
@@ -166,15 +166,27 @@ def _notify(db_path: Path) -> int:
 def _push_card(quotes: list[Quote], collected_at: str, failures: list[dict]) -> bool:
     try:
         url, secret = webhook_settings()
-        send_card(url, build_card(quotes, collected_at, failures), secret)
+        cards = build_cards(quotes, collected_at, failures)
     except LarkError as exc:
         print(f"飞书推送失败: {exc}", file=sys.stderr)
         return False
-    except Exception as exc:
-        print(f"飞书推送失败: {exc}", file=sys.stderr)
-        return False
-    print("已推送到飞书卡片")
-    return True
+    ok = True
+    for index, card in enumerate(cards):
+        if index:
+            time.sleep(0.4)
+        title = card["header"]["title"]["content"]
+        try:
+            send_card(url, card, secret)
+        except LarkError as exc:
+            print(f"飞书推送失败 {title}: {exc}", file=sys.stderr)
+            ok = False
+            continue
+        except Exception as exc:
+            print(f"飞书推送失败 {title}: {exc}", file=sys.stderr)
+            ok = False
+            continue
+        print(f"已推送 {title}")
+    return ok
 
 
 def _site(storage: Storage, path: Path) -> int:
