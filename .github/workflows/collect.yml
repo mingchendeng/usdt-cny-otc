@@ -1,0 +1,54 @@
+name: collect-otc
+
+on:
+  schedule:
+    # 每小时第 5 分钟。GitHub 的 cron 是 UTC，分钟和北京时间一致。
+    - cron: "5 * * * *"
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Collect OTC quotes
+        run: python -m otc_collector collect --pages 2
+      - name: Build static site
+        run: python -m otc_collector site site
+      - name: Notify Lark
+        env:
+          LARK_WEBHOOK_URL: ${{ secrets.LARK_WEBHOOK_URL }}
+          LARK_WEBHOOK_SECRET: ${{ secrets.LARK_WEBHOOK_SECRET }}
+        run: |
+          if [ -n "$LARK_WEBHOOK_URL" ]; then
+            python -m otc_collector notify || echo "飞书推送失败，静态页仍会发布"
+          fi
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: collect
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
