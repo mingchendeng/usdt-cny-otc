@@ -12,7 +12,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from otc_collector.models import Quote
-from otc_collector.report import TOP_MERCHANTS, summarize, top_merchants_by_orders
+from otc_collector.report import TOP_MERCHANTS, TRADE_LABEL, summarize, top_merchants_by_orders
 
 _ORDER = ("binance", "okx", "htx", "bitget")
 _ALLOWED_HOSTS = {"open.feishu.cn", "open.larksuite.com"}
@@ -61,6 +61,9 @@ def build_cards(quotes: list[Quote], collected_at: str, failures: list[dict] | N
     summary = [row for row in summarize(quotes) if row["exchange"] not in failed]
     by_exchange: dict[str, dict] = {}
     names: dict[str, str] = {}
+    for quote in quotes:
+        if quote.exchange not in failed:
+            names[quote.exchange] = quote.exchange_name
     for row in summary:
         by_exchange.setdefault(row["exchange"], {})[row["side"]] = row
         names[row["exchange"]] = row["exchange_name"]
@@ -196,7 +199,9 @@ def send_card(url: str, card: dict, secret: str | None = None, timestamp: str | 
 
 
 def _price_note(buy: dict | None, sell: dict | None) -> str:
-    parts = [f"广告 {_count(buy, sell)}"]
+    if buy is None and sell is None:
+        return f"{TRADE_LABEL}\n没有符合条件的广告"
+    parts = [TRADE_LABEL, f"广告 {_count(buy, sell)}"]
     best = []
     if buy and buy.get("merchant"):
         best.append(f"买 {buy['merchant']}")

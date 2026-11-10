@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 
 from otc_collector.models import Quote
-from otc_collector.report import TOP_MERCHANTS, summarize, top_merchants_by_orders
+from otc_collector.report import TOP_MERCHANTS, TRADE_LABEL, summarize, top_merchants_by_orders
 
 _ORDER = ("binance", "okx", "htx", "bitget")
 
@@ -26,6 +26,9 @@ def build_payload(quotes: list[Quote], collected_at: str, failures: list[dict] |
     summary = [row for row in summarize(quotes) if row["exchange"] not in failed_codes]
     by_exchange: dict[str, dict] = {}
     names: dict[str, str] = {}
+    for quote in quotes:
+        if quote.exchange not in failed_codes:
+            names[quote.exchange] = quote.exchange_name
     for row in summary:
         by_exchange.setdefault(row["exchange"], {})[row["side"]] = row
         names[row["exchange"]] = row["exchange_name"]
@@ -70,12 +73,13 @@ def build_payload(quotes: list[Quote], collected_at: str, failures: list[dict] |
                 "sell_count": 0 if sell is None else sell["count"],
                 "buy_merchant": None if buy is None else buy["merchant"],
                 "sell_merchant": None if sell is None else sell["merchant"],
+                "notice": None if buy or sell else f"没有符合{TRADE_LABEL}的广告",
             }
         )
 
     return {
         "collected_at": collected_at,
-        "note": "广告报价，不是已经成交的价格。最优价只按单价排序。",
+        "note": f"广告报价，不是已经成交的价格。最优价按{TRADE_LABEL}筛选。",
         "exchanges": exchanges,
         "merchants": top_merchants_by_orders(quotes, TOP_MERCHANTS),
     }
@@ -185,9 +189,12 @@ def _exchange_row(item: dict) -> str:
         return (
             f'<tr><td>{name}</td><td colspan="5" class="bad">{error}</td></tr>'
         )
-    buy_merchant = item["buy_merchant"] or "—"
-    sell_merchant = item["sell_merchant"] or "—"
-    merchants = _esc(f"买 {buy_merchant} / 卖 {sell_merchant}")
+    if item.get("notice") and item["buy"] is None and item["sell"] is None:
+        merchants = _esc(item["notice"])
+    else:
+        buy_merchant = item["buy_merchant"] or "—"
+        sell_merchant = item["sell_merchant"] or "—"
+        merchants = _esc(f"买 {buy_merchant} / 卖 {sell_merchant}")
     return (
         "<tr>"
         f"<td>{name}</td>"

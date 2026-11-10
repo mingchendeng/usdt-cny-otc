@@ -6,6 +6,9 @@ from otc_collector.models import Quote
 _SIDE_LABEL = {"buy": "买入USDT", "sell": "卖出USDT"}
 _EXCHANGE_ORDER = {"binance": 0, "okx": 1, "htx": 2, "bitget": 3}
 TOP_MERCHANTS = 5
+TRADE_AMOUNT_CNY = 10_000
+TRADE_PAYMENTS = ("银行卡", "支付宝")
+TRADE_LABEL = "1 万元 · 银行卡或支付宝"
 
 
 def display_width(text: str) -> int:
@@ -16,9 +19,23 @@ def pad(text: str, width: int) -> str:
     return text + " " * max(0, width - display_width(text))
 
 
+def accepts_trade(quote: Quote, amount: float = TRADE_AMOUNT_CNY, payments: tuple[str, ...] = TRADE_PAYMENTS) -> bool:
+    """1 万元能下进去，并且支持银行卡或支付宝。限额未知的广告不参与比价。"""
+    if quote.min_cny is None and quote.max_cny is None:
+        return False
+    if quote.min_cny is not None and quote.min_cny > amount:
+        return False
+    if quote.max_cny is not None and quote.max_cny < amount:
+        return False
+    allowed = set(payments)
+    return any(name in allowed for name in quote.payments)
+
+
 def summarize(quotes: list[Quote]) -> list[dict]:
     grouped: dict[tuple[str, str], list[Quote]] = defaultdict(list)
     for quote in quotes:
+        if not accepts_trade(quote):
+            continue
         grouped[(quote.exchange, quote.side)].append(quote)
     rows = []
     for (exchange, side), items in grouped.items():
@@ -46,6 +63,8 @@ def top_merchants_by_orders(quotes: list[Quote], limit: int = TOP_MERCHANTS) -> 
     """每个交易所按成交单数取出认证商家。报价入库前已经滤掉未认证用户。"""
     grouped: dict[tuple[str, str], dict] = {}
     for quote in quotes:
+        if not accepts_trade(quote):
+            continue
         identity = quote.merchant_id or quote.merchant_name
         key = (quote.exchange, identity)
         bucket = grouped.get(key)
@@ -122,6 +141,8 @@ def format_top_merchants(quotes: list[Quote], limit: int = TOP_MERCHANTS) -> str
 def format_summary(quotes: list[Quote], collected_at: str) -> str:
     rows = summarize(quotes)
     if not rows:
+        if quotes:
+            return f"{collected_at} 没有符合{TRADE_LABEL}的广告。"
         return f"{collected_at} 没有采到认证商家广告。"
     header = ("交易所", "方向", "最优价", "前10中位", "广告数", "最优商家", "等级")
     body = [
@@ -143,7 +164,7 @@ def format_summary(quotes: list[Quote], collected_at: str) -> str:
     lines = [
         f"USDT/CNY 认证商家  {collected_at}",
         "买入USDT = 你付人民币、商家卖币，价格越低越好。卖出USDT = 你卖币收人民币，价格越高越好。",
-        "最优价只按单价排序，不看限额和完成率。下面是各交易所成交单数最高的认证商家。",
+        f"最优价只看能交易 {TRADE_LABEL} 的广告，不看完成率。下面是这些广告里成交单数最高的认证商家。",
         "  ".join(pad(title, widths[index]) for index, title in enumerate(header)),
     ]
     lines.extend("  ".join(pad(line[index], widths[index]) for index in range(len(header))) for line in body)
