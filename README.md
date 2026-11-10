@@ -79,7 +79,7 @@ python -m otc_collector site
 
 代码放在公开仓库里，用 GitHub Free 托管。静态页用 GitHub Pages。GitHub Free 的 Pages 只覆盖公开仓库，所以这个仓库保持公开。
 
-采集、飞书推送和页面发布都在 GitHub Actions 里完成。`.github/workflows/collect.yml` 每小时采集一轮，写成 `index.html` 和 `quotes.json`，再发布到 Pages。生成的页面不进 Git。公开仓库的 Actions 分钟数不计入私有仓库的免费额度。
+采集、飞书推送和页面发布都在 GitHub Actions 里完成。`.github/workflows/collect.yml` 每 8 小时采集一轮，写成 `index.html` 和 `quotes.json`，再发布到 Pages。生成的页面不进 Git。公开仓库的 Actions 分钟数不计入私有仓库的免费额度。
 
 推送代码之后：
 
@@ -87,4 +87,4 @@ python -m otc_collector site
 2. Settings → Secrets and variables → Actions，新建 `LARK_WEBHOOK_URL`。开了签名校验再新建 `LARK_WEBHOOK_SECRET`。不发飞书就可以不填，页面照样发布。
 3. 推到 `main` 会自动跑一轮。也可以到 Actions 页手动跑 `collect-otc`。完成后页面在 `https://<用户名>.github.io/usdt-cny-otc/`。
 
-定时任务是每小时第 5 分钟。GitHub 可能会晚几分钟到几十分钟。交易所有时会拦数据中心 IP，第一次要看日志里四家是否都成功。
+定时任务是北京时间 08:05、16:05 和 00:05。GitHub 可能会晚几分钟到几十分钟。交易所有时会拦数据中心 IP，第一次要看日志里四家是否都成功。

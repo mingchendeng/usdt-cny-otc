@@ -2,8 +2,8 @@ name: collect-otc
 
 on:
   schedule:
-    # 每小时第 5 分钟。GitHub 的 cron 是 UTC，分钟和北京时间一致。
-    - cron: "5 * * * *"
+    # 每 8 小时一次。GitHub 的 cron 是 UTC：00:05、08:05、16:05，对应北京时间 08:05、16:05、00:05。
+    - cron: "5 */8 * * *"
   workflow_dispatch:
   push:
     branches: [main]
