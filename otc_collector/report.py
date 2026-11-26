@@ -6,9 +6,9 @@ from otc_collector.models import Quote
 _SIDE_LABEL = {"buy": "买入USDT", "sell": "卖出USDT"}
 _EXCHANGE_ORDER = {"binance": 0, "okx": 1, "htx": 2, "bitget": 3}
 TOP_MERCHANTS = 5
-TRADE_AMOUNT_CNY = 10_000
+TRADE_AMOUNT_CNY = 100_000
 TRADE_PAYMENTS = ("银行卡", "支付宝")
-TRADE_LABEL = "1 万元 · 银行卡或支付宝"
+TRADE_LABEL = "10 万元 · 银行卡或支付宝"
 
 
 def display_width(text: str) -> int:
@@ -20,7 +20,7 @@ def pad(text: str, width: int) -> str:
 
 
 def accepts_trade(quote: Quote, amount: float = TRADE_AMOUNT_CNY, payments: tuple[str, ...] = TRADE_PAYMENTS) -> bool:
-    """1 万元能下进去，并且支持银行卡或支付宝。限额未知的广告不参与比价。"""
+    """10 万元能下进去，并且支持银行卡或支付宝。限额未知的广告不参与比价。"""
     if quote.min_cny is None and quote.max_cny is None:
         return False
     if quote.min_cny is not None and quote.min_cny > amount:

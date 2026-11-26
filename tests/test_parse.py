@@ -167,7 +167,7 @@ def _quote(exchange, name, side, price, merchant):
         price=price,
         available_usdt=1,
         min_cny=100,
-        max_cny=50000,
+        max_cny=500000,
         payments=("银行卡",),
         merchant_name=merchant,
         merchant_id="1",

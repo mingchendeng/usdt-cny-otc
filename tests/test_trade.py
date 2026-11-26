@@ -11,7 +11,7 @@ class TradeFilterTests(unittest.TestCase):
         quotes = [
             _quote("buy", 6.50, "小额", max_cny=1000),
             _quote("buy", 6.40, "只收微信", payments=("微信",)),
-            _quote("buy", 6.70, "门槛太高", min_cny=20000),
+            _quote("buy", 6.70, "门槛太高", min_cny=200000),
             _quote("buy", 6.66, "银行卡商家", payments=("银行卡",)),
             _quote("buy", 6.67, "支付宝商家", payments=("支付宝",)),
             _quote("sell", 6.80, "卖出商家"),
@@ -30,13 +30,13 @@ class TradeFilterTests(unittest.TestCase):
         values = [column["elements"][1]["content"] for column in card["body"]["elements"][0]["columns"]]
         self.assertEqual(values, ["6.6600", "6.8000", "+0.1400"])
         text = "\n".join(element.get("content", "") for element in card["body"]["elements"])
-        self.assertIn("1 万元 · 银行卡或支付宝", text)
+        self.assertIn("10 万元 · 银行卡或支付宝", text)
         self.assertNotIn("小额", text)
         self.assertNotIn("只收微信", text)
 
         page = build_payload(quotes, "t", [])
         self.assertEqual(page["exchanges"][0]["buy"], 6.66)
-        self.assertIn("1 万元", page["note"])
+        self.assertIn("10 万元", page["note"])
 
     def test_exchange_stays_visible_when_nothing_fits(self):
         quotes = [_quote("buy", 6.50, "小额", max_cny=500)]
@@ -50,11 +50,11 @@ class TradeFilterTests(unittest.TestCase):
         self.assertIn("没有符合条件的广告", text)
 
     def test_boundary_amount_is_included(self):
-        self.assertTrue(accepts_trade(_quote("buy", 6.6, "刚好", min_cny=10000, max_cny=10000)))
+        self.assertTrue(accepts_trade(_quote("buy", 6.6, "刚好", min_cny=100000, max_cny=100000)))
         self.assertFalse(accepts_trade(_quote("buy", 6.6, "未知限额", min_cny=None, max_cny=None)))
 
 
-def _quote(side, price, merchant, min_cny=100, max_cny=50000, payments=("银行卡",)):
+def _quote(side, price, merchant, min_cny=100, max_cny=500000, payments=("银行卡",)):
     return Quote(
         exchange="binance",
         exchange_name="币安",
