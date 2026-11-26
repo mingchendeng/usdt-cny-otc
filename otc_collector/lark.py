@@ -66,13 +66,13 @@ def build_cards(quotes: list[Quote], collected_at: str, failures: list[dict] | N
     failures = failures or []
     failed = {item["exchange"]: item for item in failures}
     summary = [row for row in summarize(quotes) if row["exchange"] not in failed]
-    by_exchange: dict[str, dict] = {}
+    by_exchange: dict[str, dict[str, dict]] = {}
     names: dict[str, str] = {}
     for quote in quotes:
         if quote.exchange not in failed:
             names[quote.exchange] = quote.exchange_name
     for row in summary:
-        by_exchange.setdefault(row["exchange"], {})[row["side"]] = row
+        by_exchange.setdefault(row["exchange"], {}).setdefault(row["payment"], {})[row["side"]] = row
         names[row["exchange"]] = row["exchange_name"]
     for item in failures:
         names[item["exchange"]] = item["exchange_name"]
@@ -102,14 +102,20 @@ def build_cards(quotes: list[Quote], collected_at: str, failures: list[dict] | N
             elements.append(_line(f"**{name}**  <font color='red'>没有采到</font>  {error}"))
             summary_parts.append(f"{name}失败")
             continue
-        buy = by_exchange.get(code, {}).get("buy")
-        sell = by_exchange.get(code, {}).get("sell")
-        if buy is None and sell is None:
+        rails = by_exchange.get(code) or {}
+        if not rails:
             elements.append(_line(f"**{name}**  没有符合条件的广告"))
             summary_parts.append(f"{name}无报价")
             continue
-        elements.append(_price_line([name, _price(buy), _price(sell), _spread(buy, sell)], "normal", bold_name=True))
-        summary_parts.append(f"{name} {_price(buy)}/{_price(sell)}")
+        for payment in TRADE_PAYMENTS:
+            sides = rails.get(payment)
+            if not sides:
+                continue
+            buy = sides.get("buy")
+            sell = sides.get("sell")
+            label = f"{name} · {payment}"
+            elements.append(_price_line([label, _price(buy), _price(sell), _spread(buy, sell)], "normal", bold_name=True))
+            summary_parts.append(f"{label} {_price(buy)}/{_price(sell)}")
         merchant_text = _merchant_block(merchants.get(code, []), name)
         if merchant_text:
             merchant_blocks.append(merchant_text)

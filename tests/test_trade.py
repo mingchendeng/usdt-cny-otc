@@ -14,22 +14,24 @@ class TradeFilterTests(unittest.TestCase):
             _quote("buy", 6.70, "门槛太高", min_cny=200000),
             _quote("buy", 6.66, "银行卡商家", payments=("银行卡",)),
             _quote("buy", 6.67, "支付宝商家", payments=("支付宝",)),
-            _quote("sell", 6.80, "卖出商家"),
+            _quote("sell", 6.60, "卖出商家"),
         ]
         self.assertFalse(accepts_trade(quotes[0]))
         self.assertFalse(accepts_trade(quotes[1]))
         self.assertFalse(accepts_trade(quotes[2]))
         self.assertTrue(accepts_trade(quotes[3]))
-        rows = {row["side"]: row for row in summarize(quotes)}
-        self.assertEqual(rows["buy"]["best"], 6.66)
-        self.assertEqual(rows["buy"]["merchant"], "银行卡商家")
-        self.assertEqual(rows["buy"]["count"], 2)
-        self.assertEqual(rows["sell"]["best"], 6.80)
+        rows = {(row["payment"], row["side"]): row for row in summarize(quotes)}
+        self.assertEqual(rows[("银行卡", "buy")]["best"], 6.66)
+        self.assertEqual(rows[("银行卡", "buy")]["merchant"], "银行卡商家")
+        self.assertEqual(rows[("银行卡", "buy")]["count"], 1)
+        self.assertEqual(rows[("银行卡", "sell")]["best"], 6.60)
+        self.assertEqual(rows[("支付宝", "buy")]["best"], 6.67)
+        self.assertNotIn(("支付宝", "sell"), rows)
 
         card = build_cards(quotes, "t")[0]
         rows = [element for element in card["body"]["elements"] if element["tag"] == "column_set"]
         values = [column["elements"][0]["content"] for column in rows[1]["columns"]]
-        self.assertEqual(values, ["**币安**", "6.66", "6.80", "+0.14"])
+        self.assertEqual(values, ["**币安 · 银行卡**", "6.66", "6.60", "-0.06"])
         self.assertIn("10万 · 银行卡/支付宝", card["header"]["subtitle"]["content"])
         text = "\n".join(element.get("content", "") for element in card["body"]["elements"])
         self.assertNotIn("小额", text)
@@ -49,6 +51,32 @@ class TradeFilterTests(unittest.TestCase):
         card = build_cards(quotes, "t")[0]
         text = "\n".join(element.get("content", "") for element in card["body"]["elements"])
         self.assertIn("没有符合条件的广告", text)
+
+    def test_same_price_on_two_payment_methods_is_not_one_quote(self):
+        quotes = [
+            _quote("buy", 6.70, "支付宝低价", payments=("支付宝",)),
+            _quote("sell", 6.69, "支付宝收购", payments=("支付宝",)),
+            _quote("buy", 6.73, "银行卡卖家", payments=("银行卡",)),
+            _quote("sell", 6.70, "银行卡高价", payments=("银行卡",)),
+        ]
+        rows = {(row["payment"], row["side"]): row for row in summarize(quotes)}
+        self.assertEqual(rows[("支付宝", "buy")]["best"], 6.70)
+        self.assertEqual(rows[("支付宝", "sell")]["best"], 6.69)
+        self.assertEqual(rows[("银行卡", "buy")]["best"], 6.73)
+        self.assertEqual(rows[("银行卡", "sell")]["best"], 6.70)
+
+    def test_same_price_inside_one_method_is_dropped(self):
+        quotes = [
+            _quote("buy", 6.70, "撞车买入", payments=("支付宝",)),
+            _quote("buy", 6.72, "正常买入", payments=("支付宝",)),
+            _quote("sell", 6.70, "撞车卖出", payments=("支付宝",)),
+            _quote("sell", 6.68, "正常卖出", payments=("支付宝",)),
+        ]
+        rows = {row["side"]: row for row in summarize(quotes)}
+        self.assertEqual(rows["buy"]["best"], 6.72)
+        self.assertEqual(rows["buy"]["merchant"], "正常买入")
+        self.assertEqual(rows["sell"]["best"], 6.68)
+        self.assertEqual(rows["sell"]["merchant"], "正常卖出")
 
     def test_boundary_amount_is_included(self):
         self.assertTrue(accepts_trade(_quote("buy", 6.6, "刚好", min_cny=100000, max_cny=100000)))

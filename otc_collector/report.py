@@ -32,31 +32,78 @@ def accepts_trade(quote: Quote, amount: float = TRADE_AMOUNT_CNY, payments: tupl
 
 
 def summarize(quotes: list[Quote]) -> list[dict]:
-    grouped: dict[tuple[str, str], list[Quote]] = defaultdict(list)
+    """每个交易所、每种支付方式各算一对买卖价。买入价必须高于卖出价。"""
+    by_exchange: dict[str, list[Quote]] = defaultdict(list)
+    for quote in quotes:
+        by_exchange[quote.exchange].append(quote)
+    rows = []
+    for exchange in sorted(by_exchange, key=lambda code: _EXCHANGE_ORDER.get(code, 9)):
+        for payment, buy, sell, buy_ads, sell_ads in _rails(by_exchange[exchange]):
+            for side, quote, ads in (("buy", buy, buy_ads), ("sell", sell, sell_ads)):
+                if quote is None:
+                    continue
+                ordered = sorted(ads, key=lambda item: item.price, reverse=(side == "sell"))
+                top = ordered[:10]
+                rows.append(
+                    {
+                        "exchange": exchange,
+                        "exchange_name": quote.exchange_name,
+                        "side": side,
+                        "payment": payment,
+                        "count": len(ads),
+                        "best": quote.price,
+                        "median10": statistics.median(item.price for item in top),
+                        "merchant": quote.merchant_name,
+                        "tier": quote.merchant_tier,
+                        "payments": payment,
+                    }
+                )
+    return rows
+
+
+def _rails(quotes: list[Quote]) -> list[tuple[str, Quote | None, Quote | None, list[Quote], list[Quote]]]:
+    books: dict[str, list[Quote]] = {payment: [] for payment in TRADE_PAYMENTS}
     for quote in quotes:
         if not accepts_trade(quote):
             continue
-        grouped[(quote.exchange, quote.side)].append(quote)
-    rows = []
-    for (exchange, side), items in grouped.items():
-        ordered = sorted(items, key=lambda quote: quote.price, reverse=(side == "sell"))
-        top = ordered[:10]
-        best = ordered[0]
-        rows.append(
-            {
-                "exchange": exchange,
-                "exchange_name": best.exchange_name,
-                "side": side,
-                "count": len(items),
-                "best": best.price,
-                "median10": statistics.median(quote.price for quote in top),
-                "merchant": best.merchant_name,
-                "tier": best.merchant_tier,
-                "payments": "、".join(best.payments),
-            }
-        )
-    rows.sort(key=lambda row: (_EXCHANGE_ORDER.get(row["exchange"], 9), 0 if row["side"] == "buy" else 1))
-    return rows
+        for payment in TRADE_PAYMENTS:
+            if payment in quote.payments:
+                books[payment].append(quote)
+    rails = []
+    for payment in TRADE_PAYMENTS:
+        ads = books[payment]
+        buys = [quote for quote in ads if quote.side == "buy"]
+        sells = [quote for quote in ads if quote.side == "sell"]
+        buy, sell = _separated(buys, sells)
+        if buy is None and sell is None:
+            continue
+        rails.append((payment, buy, sell, buys, sells))
+    return rails
+
+
+def _separated(buys: list[Quote], sells: list[Quote]) -> tuple[Quote | None, Quote | None]:
+    """丢掉让买入价小于或等于卖出价的那一层，直到买入更贵，或某一边空了。"""
+    buys = sorted(buys, key=lambda quote: (quote.price, quote.ad_id))
+    sells = sorted(sells, key=lambda quote: (-quote.price, quote.ad_id))
+    buy_index = sell_index = 0
+    while (
+        buy_index < len(buys)
+        and sell_index < len(sells)
+        and _cents(buys[buy_index].price) <= _cents(sells[sell_index].price)
+    ):
+        buy_level = _cents(buys[buy_index].price)
+        sell_level = _cents(sells[sell_index].price)
+        while buy_index < len(buys) and _cents(buys[buy_index].price) == buy_level:
+            buy_index += 1
+        while sell_index < len(sells) and _cents(sells[sell_index].price) == sell_level:
+            sell_index += 1
+    buy = buys[buy_index] if buy_index < len(buys) else None
+    sell = sells[sell_index] if sell_index < len(sells) else None
+    return buy, sell
+
+
+def _cents(price: float) -> float:
+    return round(price, 4)
 
 
 def top_merchants_by_orders(quotes: list[Quote], limit: int = TOP_MERCHANTS) -> list[dict]:
@@ -147,7 +194,7 @@ def format_summary(quotes: list[Quote], collected_at: str) -> str:
     header = ("交易所", "方向", "最优价", "前10中位", "广告数", "最优商家", "等级")
     body = [
         (
-            row["exchange_name"],
+            f"{row['exchange_name']} · {row['payment']}",
             _SIDE_LABEL[row["side"]],
             f"{row['best']:.4f}",
             f"{row['median10']:.4f}",
@@ -164,7 +211,7 @@ def format_summary(quotes: list[Quote], collected_at: str) -> str:
     lines = [
         f"USDT/CNY 认证商家  {collected_at}",
         "买入USDT = 你付人民币、商家卖币，价格越低越好。卖出USDT = 你卖币收人民币，价格越高越好。",
-        f"最优价只看能交易 {TRADE_LABEL} 的广告，不看完成率。下面是这些广告里成交单数最高的认证商家。",
+        f"最优价只看能交易 {TRADE_LABEL} 的广告，买卖分开支付方式，买入价必须高于卖出价。",
         "  ".join(pad(title, widths[index]) for index, title in enumerate(header)),
     ]
     lines.extend("  ".join(pad(line[index], widths[index]) for index in range(len(header))) for line in body)

@@ -12,7 +12,7 @@ class LarkCardTests(unittest.TestCase):
     def test_card_prices_spread_and_failure(self):
         quotes = [
             _quote("binance", "币安", "buy", 6.65, "便宜商家"),
-            _quote("binance", "币安", "sell", 6.67, "高价商家"),
+            _quote("binance", "币安", "sell", 6.63, "高价商家"),
             _quote("okx", "欧易", "buy", 6.66, "欧易商家"),
             _quote("htx", "HTX", "buy", 6.64, "不该出现"),
         ]
@@ -30,8 +30,8 @@ class LarkCardTests(unittest.TestCase):
         rows = [element for element in card["body"]["elements"] if element["tag"] == "column_set"]
         binance = [column["elements"][0]["content"] for column in rows[1]["columns"]]
         okx = [column["elements"][0]["content"] for column in rows[2]["columns"]]
-        self.assertEqual(binance, ["**币安**", "6.65", "6.67", "+0.02"])
-        self.assertEqual(okx, ["**欧易**", "6.66", "—", "—"])
+        self.assertEqual(binance, ["**币安 · 银行卡**", "6.65", "6.63", "-0.02"])
+        self.assertEqual(okx, ["**欧易 · 银行卡**", "6.66", "—", "—"])
         text = "\n".join(element.get("content", "") for element in card["body"]["elements"])
         merchant_text = "\n".join(
             element["content"] for element in card["body"]["elements"] if "成交靠前" in element.get("content", "")

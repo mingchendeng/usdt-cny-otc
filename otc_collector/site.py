@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 
 from otc_collector.models import Quote
-from otc_collector.report import TOP_MERCHANTS, TRADE_LABEL, summarize, top_merchants_by_orders
+from otc_collector.report import TOP_MERCHANTS, TRADE_LABEL, TRADE_PAYMENTS, summarize, top_merchants_by_orders
 
 _ORDER = ("binance", "okx", "htx", "bitget")
 
@@ -24,13 +24,13 @@ def build_payload(quotes: list[Quote], collected_at: str, failures: list[dict] |
     failures = failures or []
     failed_codes = {item["exchange"] for item in failures}
     summary = [row for row in summarize(quotes) if row["exchange"] not in failed_codes]
-    by_exchange: dict[str, dict] = {}
+    by_exchange: dict[str, dict[str, dict]] = {}
     names: dict[str, str] = {}
     for quote in quotes:
         if quote.exchange not in failed_codes:
             names[quote.exchange] = quote.exchange_name
     for row in summary:
-        by_exchange.setdefault(row["exchange"], {})[row["side"]] = row
+        by_exchange.setdefault(row["exchange"], {}).setdefault(row["payment"], {})[row["side"]] = row
         names[row["exchange"]] = row["exchange_name"]
     for item in failures:
         names[item["exchange"]] = item["exchange_name"]
@@ -58,30 +58,39 @@ def build_payload(quotes: list[Quote], collected_at: str, failures: list[dict] |
                 }
             )
             continue
-        buy = by_exchange.get(code, {}).get("buy")
-        sell = by_exchange.get(code, {}).get("sell")
-        exchanges.append(
-            {
-                "exchange": code,
-                "exchange_name": names[code],
-                "ok": True,
-                "error": None,
-                "buy": None if buy is None else buy["best"],
-                "sell": None if sell is None else sell["best"],
-                "spread": None if buy is None or sell is None else round(sell["best"] - buy["best"], 4),
-                "buy_count": 0 if buy is None else buy["count"],
-                "sell_count": 0 if sell is None else sell["count"],
-                "buy_merchant": None if buy is None else buy["merchant"],
-                "sell_merchant": None if sell is None else sell["merchant"],
-                "notice": None if buy or sell else f"没有符合{TRADE_LABEL}的广告",
-            }
-        )
+        rails = by_exchange.get(code) or {}
+        if not rails:
+            exchanges.append(_exchange_payload(code, names[code], None, None, None))
+            continue
+        for payment in TRADE_PAYMENTS:
+            sides = rails.get(payment)
+            if sides:
+                exchanges.append(_exchange_payload(code, names[code], payment, sides.get("buy"), sides.get("sell")))
 
     return {
         "collected_at": collected_at,
-        "note": f"广告报价，不是已经成交的价格。最优价按{TRADE_LABEL}筛选。",
+        "note": f"广告报价，不是已经成交的价格。最优价按{TRADE_LABEL}筛选，买卖分开支付方式，买入价高于卖出价。",
         "exchanges": exchanges,
         "merchants": top_merchants_by_orders(quotes, TOP_MERCHANTS),
+    }
+
+
+def _exchange_payload(code: str, name: str, payment: str | None, buy: dict | None, sell: dict | None) -> dict:
+    label = name if not payment else f"{name} · {payment}"
+    return {
+        "exchange": code,
+        "exchange_name": label,
+        "payment": payment,
+        "ok": True,
+        "error": None,
+        "buy": None if buy is None else buy["best"],
+        "sell": None if sell is None else sell["best"],
+        "spread": None if buy is None or sell is None else round(sell["best"] - buy["best"], 4),
+        "buy_count": 0 if buy is None else buy["count"],
+        "sell_count": 0 if sell is None else sell["count"],
+        "buy_merchant": None if buy is None else buy["merchant"],
+        "sell_merchant": None if sell is None else sell["merchant"],
+        "notice": None if buy or sell else f"没有符合{TRADE_LABEL}的广告",
     }
 
 

@@ -69,10 +69,10 @@ class ParseTests(unittest.TestCase):
             _quote("binance", "币安", "sell", 6.66, "低价"),
         ]
         rows = {row["side"]: row for row in summarize(quotes)}
-        self.assertEqual(rows["buy"]["best"], 6.60)
-        self.assertEqual(rows["buy"]["merchant"], "便宜")
-        self.assertEqual(rows["sell"]["best"], 6.80)
-        self.assertEqual(rows["sell"]["merchant"], "高价")
+        self.assertEqual(rows["buy"]["best"], 6.70)
+        self.assertEqual(rows["buy"]["merchant"], "贵")
+        self.assertEqual(rows["sell"]["best"], 6.66)
+        self.assertEqual(rows["sell"]["merchant"], "低价")
 
 
 def _binance(user_type, identity):
