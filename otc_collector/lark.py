@@ -12,7 +12,14 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from otc_collector.models import Quote
-from otc_collector.report import TOP_MERCHANTS, TRADE_LABEL, summarize, top_merchants_by_orders
+from otc_collector.report import (
+    TOP_MERCHANTS,
+    TRADE_AMOUNT_CNY,
+    TRADE_PAYMENTS,
+    display_width,
+    summarize,
+    top_merchants_by_orders,
+)
 
 _ORDER = ("binance", "okx", "htx", "bitget")
 _ALLOWED_HOSTS = {"open.feishu.cn", "open.larksuite.com"}
@@ -55,7 +62,7 @@ def sign(timestamp: str, secret: str) -> str:
 
 
 def build_cards(quotes: list[Quote], collected_at: str, failures: list[dict] | None = None) -> list[dict]:
-    """每个交易所一张卡片。失败的交易所单独一张红卡片。"""
+    """四个交易所放在同一张卡片里，一次推送只发一条消息。"""
     failures = failures or []
     failed = {item["exchange"]: item for item in failures}
     summary = [row for row in summarize(quotes) if row["exchange"] not in failed]
@@ -73,7 +80,7 @@ def build_cards(quotes: list[Quote], collected_at: str, failures: list[dict] | N
     codes = [code for code in _ORDER if code in names]
     codes.extend(code for code in names if code not in codes)
     if not codes:
-        return [_shell("USDT/CNY", collected_at, "grey", "本轮没有报价", [{"tag": "markdown", "content": "这一轮没有采到认证商家广告。"}])]
+        return [_shell("USDT/CNY", collected_at, "grey", "本轮没有报价", [{"tag": "markdown", "content": "这一轮没有采到认证商家广告。", "margin": "0px"}])]
 
     merchants = {
         group["exchange"]: group["merchants"]
@@ -82,52 +89,49 @@ def build_cards(quotes: list[Quote], collected_at: str, failures: list[dict] | N
             TOP_MERCHANTS,
         )
     }
-    cards = []
+    priced = [code for code in codes if code not in failed and by_exchange.get(code)]
+    elements: list[dict] = []
+    if priced:
+        elements.append(_price_line(["", "买入", "卖出", "价差"], "notation"))
+    summary_parts = []
+    merchant_blocks = []
     for code in codes:
         name = names[code]
         if code in failed:
             error = _short(failed[code].get("error") or "未知错误")
-            cards.append(
-                _shell(
-                    name,
-                    collected_at,
-                    "red",
-                    f"{name}失败",
-                    [{"tag": "markdown", "content": f"这一轮没有采到。\n\n{error}", "text_size": "normal"}],
-                )
-            )
+            elements.append(_line(f"**{name}**  <font color='red'>没有采到</font>  {error}"))
+            summary_parts.append(f"{name}失败")
             continue
         buy = by_exchange.get(code, {}).get("buy")
         sell = by_exchange.get(code, {}).get("sell")
-        buy_text = _price(buy)
-        sell_text = _price(sell)
-        spread = _spread(buy, sell)
-        elements: list[dict] = [
-            {
-                "tag": "column_set",
-                "flex_mode": "trisect",
-                "horizontal_spacing": "large",
-                "columns": [
-                    _stat_column("买入", buy_text),
-                    _stat_column("卖出", sell_text),
-                    _stat_column("价差", spread),
-                ],
-            },
+        if buy is None and sell is None:
+            elements.append(_line(f"**{name}**  没有符合条件的广告"))
+            summary_parts.append(f"{name}无报价")
+            continue
+        elements.append(_price_line([name, _price(buy), _price(sell), _spread(buy, sell)], "normal", bold_name=True))
+        summary_parts.append(f"{name} {_price(buy)}/{_price(sell)}")
+        merchant_text = _merchant_block(merchants.get(code, []), name)
+        if merchant_text:
+            merchant_blocks.append(merchant_text)
+    for index, text in enumerate(merchant_blocks):
+        elements.append(
             {
                 "tag": "markdown",
-                "content": _price_note(buy, sell),
-                "text_align": "center",
+                "content": text,
                 "text_size": "notation",
-            },
-        ]
-        merchant_text = _merchant_block(merchants.get(code, []))
-        if merchant_text:
-            elements.append({"tag": "hr"})
-            elements.append({"tag": "markdown", "content": merchant_text, "text_size": "normal"})
-        cards.append(
-            _shell(name, collected_at, "blue", f"{name} 买{buy_text} 卖{sell_text}", elements)
+                "margin": "8px 0px 0px 0px" if index == 0 else "4px 0px 0px 0px",
+            }
         )
-    return cards
+    fetch_failures = sum(code in failed for code in codes)
+    if fetch_failures == len(codes):
+        template = "red"
+    elif fetch_failures:
+        template = "orange"
+    elif priced:
+        template = "blue"
+    else:
+        template = "grey"
+    return [_shell("USDT/CNY", collected_at, template, " · ".join(summary_parts), elements)]
 
 
 def _shell(title: str, collected_at: str, template: str, summary: str, elements: list[dict]) -> dict:
@@ -137,27 +141,51 @@ def _shell(title: str, collected_at: str, template: str, summary: str, elements:
         "header": {
             "template": template,
             "title": {"tag": "plain_text", "content": title},
-            "subtitle": {"tag": "plain_text", "content": collected_at},
+            "subtitle": {"tag": "plain_text", "content": f"{_clock(collected_at)} · {_filter_label()}"},
         },
         "body": {
             "direction": "vertical",
-            "padding": "16px 20px 20px 20px",
+            "padding": "12px 12px 12px 12px",
             "elements": elements,
         },
     }
 
 
-def _stat_column(label: str, value: str) -> dict:
+_COLUMN_WEIGHTS = (5, 4, 4, 3)
+
+
+def _price_line(cells: list[str], size: str, bold_name: bool = False) -> dict:
+    columns = []
+    for index, (content, weight) in enumerate(zip(cells, _COLUMN_WEIGHTS)):
+        text = f"**{content}**" if bold_name and index == 0 else content
+        columns.append(
+            {
+                "tag": "column",
+                "width": "weighted",
+                "weight": weight,
+                "vertical_align": "center",
+                "elements": [
+                    {
+                        "tag": "markdown",
+                        "content": text or " ",
+                        "text_align": "left" if index == 0 else "right",
+                        "text_size": size,
+                        "margin": "0px",
+                    }
+                ],
+            }
+        )
     return {
-        "tag": "column",
-        "width": "weighted",
-        "weight": 1,
-        "vertical_align": "top",
-        "elements": [
-            {"tag": "markdown", "content": label, "text_align": "center", "text_size": "notation"},
-            {"tag": "markdown", "content": value, "text_align": "center", "text_size": "heading"},
-        ],
+        "tag": "column_set",
+        "flex_mode": "none",
+        "horizontal_spacing": "small",
+        "margin": "2px 0px 0px 0px",
+        "columns": columns,
     }
+
+
+def _line(content: str) -> dict:
+    return {"tag": "markdown", "content": content, "text_size": "normal", "margin": "4px 0px 0px 0px"}
 
 
 def send_card(url: str, card: dict, secret: str | None = None, timestamp: str | None = None):
@@ -198,63 +226,98 @@ def send_card(url: str, card: dict, secret: str | None = None, timestamp: str | 
     return result
 
 
-def _price_note(buy: dict | None, sell: dict | None) -> str:
-    if buy is None and sell is None:
-        return f"{TRADE_LABEL}\n没有符合条件的广告"
-    parts = [TRADE_LABEL, f"广告 {_count(buy, sell)}"]
-    best = []
-    if buy and buy.get("merchant"):
-        best.append(f"买 {buy['merchant']}")
-    if sell and sell.get("merchant"):
-        best.append(f"卖 {sell['merchant']}")
-    if best:
-        parts.append("最优价 " + " · ".join(best))
-    return "\n".join(parts)
-
-
-def _merchant_block(merchants: list[dict]) -> str:
+def _merchant_block(merchants: list[dict], exchange_name: str) -> str:
     if not merchants:
         return ""
     windows = {merchant["order_window"] for merchant in merchants if merchant["order_window"]}
-    window = next(iter(windows)) if len(windows) == 1 else ""
-    title = f"**成交单数靠前 · {len(merchants)} 家**"
-    if window:
-        title += f"（{window}）"
-    lines = [title, ""]
-    for index, merchant in enumerate(merchants, start=1):
-        if merchant["orders"] is None:
-            orders = "单数未知"
-        else:
-            orders = f"{merchant['orders']} 单"
-        if merchant["order_window"] and not window:
-            orders += f"（{merchant['order_window']}）"
-        rate = "—" if merchant["completion_rate"] is None else f"{merchant['completion_rate']:.2f}%"
-        buy = "—" if merchant["buy"] is None else f"{merchant['buy']:.4f}"
-        sell = "—" if merchant["sell"] is None else f"{merchant['sell']:.4f}"
-        lines.append(f"**{index}. {merchant['merchant_name']}**")
-        lines.append(f"{merchant['tier']} · {orders} · 完成率 {rate}")
-        lines.append(f"买 {buy}")
-        lines.append(f"卖 {sell}")
-        lines.append("")
-    return "\n".join(lines).strip()
+    shared = next(iter(windows)) if len(windows) == 1 else ""
+    title = f"**{exchange_name} · 成交靠前**"
+    if shared:
+        title += f" · {shared}"
+    return "\n".join([title, *(_merchant_line(merchant, show_window=not shared) for merchant in merchants)])
+
+
+def _merchant_line(merchant: dict, show_window: bool) -> str:
+    name = _short_name(merchant["merchant_name"], width=16)
+    orders = _orders(merchant)
+    if show_window and merchant["order_window"]:
+        orders += f"（{merchant['order_window']}）"
+    prices = []
+    if merchant["buy"] is not None:
+        prices.append(f"买 {_fmt(merchant['buy'])}")
+    if merchant["sell"] is not None:
+        prices.append(f"卖 {_fmt(merchant['sell'])}")
+    return f"{name} · {orders} · {' / '.join(prices) or '—'}"
+
+
+def _orders(merchant: dict) -> str:
+    orders = merchant["orders"]
+    if orders is None:
+        return "单数未知"
+    if orders >= 10_000:
+        wan = orders / 10_000
+        text = f"{wan:.1f}".rstrip("0").rstrip(".")
+        return f"{text}万单"
+    return f"{orders}单"
+
+
+def _filter_label() -> str:
+    amount = TRADE_AMOUNT_CNY // 10_000
+    payments = "/".join(TRADE_PAYMENTS)
+    return f"{amount}万 · {payments}"
+
+
+def _clock(collected_at: str) -> str:
+    text = collected_at.replace("T", " ")
+    if len(text) >= 16 and text[4] == "-" and text[7] == "-" and text[10] == " ":
+        return text[5:16]
+    return collected_at
+
+
+def _short_name(name: str, width: int = 12) -> str:
+    short = name.strip()
+    for sep in ("-", "－", "—", "–", "|"):
+        if sep in short:
+            head = short.split(sep, 1)[0].strip()
+            if head:
+                short = head
+            break
+    if display_width(short) <= width:
+        return short
+    kept = []
+    used = 0
+    for char in short:
+        size = 2 if ord(char) > 127 else 1
+        if used + size > width - 2:
+            break
+        kept.append(char)
+        used += size
+    return "".join(kept) + "…"
 
 
 def _price(row: dict | None) -> str:
     if not row:
         return "—"
-    return f"{row['best']:.4f}"
+    return _fmt(row["best"])
 
 
 def _spread(buy: dict | None, sell: dict | None) -> str:
     if not buy or not sell:
         return "—"
-    return f"{sell['best'] - buy['best']:+.4f}"
+    return _fmt(sell["best"] - buy["best"], signed=True)
 
 
-def _count(buy: dict | None, sell: dict | None) -> str:
-    buy_count = 0 if buy is None else buy["count"]
-    sell_count = 0 if sell is None else sell["count"]
-    return f"买{buy_count}/卖{sell_count}"
+def _fmt(value: float, signed: bool = False) -> str:
+    number = f"{abs(value):.4f}".rstrip("0").rstrip(".")
+    if "." not in number or len(number.split(".")[1]) < 2:
+        number = f"{abs(value):.2f}"
+    if not signed:
+        return number
+    if value > 0:
+        return f"+{number}"
+    if value < 0:
+        return f"-{number}"
+    return "0.00"
 
 
 def _short(text: str) -> str:

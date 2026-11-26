@@ -27,10 +27,11 @@ class TradeFilterTests(unittest.TestCase):
         self.assertEqual(rows["sell"]["best"], 6.80)
 
         card = build_cards(quotes, "t")[0]
-        values = [column["elements"][1]["content"] for column in card["body"]["elements"][0]["columns"]]
-        self.assertEqual(values, ["6.6600", "6.8000", "+0.1400"])
+        rows = [element for element in card["body"]["elements"] if element["tag"] == "column_set"]
+        values = [column["elements"][0]["content"] for column in rows[1]["columns"]]
+        self.assertEqual(values, ["**币安**", "6.66", "6.80", "+0.14"])
+        self.assertIn("10万 · 银行卡/支付宝", card["header"]["subtitle"]["content"])
         text = "\n".join(element.get("content", "") for element in card["body"]["elements"])
-        self.assertIn("10 万元 · 银行卡或支付宝", text)
         self.assertNotIn("小额", text)
         self.assertNotIn("只收微信", text)
 
